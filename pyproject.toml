@@ -1,0 +1,18 @@
+[project]
+name = "gtc-mcp"
+version = "0.1.0"
+description = "MCP server for insurance terms and conditions documents"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "mcp>=1.6.0",
+  "pypdf>=5.4.0",
+  "zeep>=4.3.1",
+]
+
+[project.scripts]
+gtc-mcp = "server:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
