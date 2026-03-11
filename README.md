@@ -39,6 +39,30 @@ pip install -e .
 gtc-mcp
 ```
 
+Run with streamable HTTP:
+
+```bash
+gtc-mcp --transport streamable-http
+```
+
+Bind on all interfaces for container or homelab use:
+
+```bash
+gtc-mcp --transport streamable-http --host 0.0.0.0 --port 8000
+```
+
+Optional mount path for SSE:
+
+```bash
+gtc-mcp --transport sse --mount-path /mcp
+```
+
+Optional streamable HTTP path:
+
+```bash
+gtc-mcp --transport streamable-http --streamable-http-path /mcp
+```
+
 Optional override:
 
 ```bash
@@ -49,6 +73,48 @@ Document bodies are cached locally after the first fetch. Optional override:
 
 ```bash
 export GTC_CACHE_DIR="/absolute/path/to/cache"
+```
+
+You can also set the transport defaults with environment variables:
+
+```bash
+export MCP_TRANSPORT="streamable-http"
+export MCP_MOUNT_PATH="/mcp"
+export MCP_HOST="0.0.0.0"
+export MCP_PORT="8000"
+export MCP_STREAMABLE_HTTP_PATH="/mcp"
+```
+
+## Container image
+
+Build locally:
+
+```bash
+make docker-build
+```
+
+Publish to your Zot registry:
+
+```bash
+make docker-publish ZOT_REGISTRY=zot.example.lan:5000 IMAGE_TAG=latest
+```
+
+Build and push a multi-arch image for `linux/amd64` and `linux/arm64`:
+
+```bash
+make docker-publishx ZOT_REGISTRY=zot.example.lan:5000 IMAGE_TAG=latest
+```
+
+You can override the target platforms if needed:
+
+```bash
+make docker-publishx ZOT_REGISTRY=zot.example.lan:5000 IMAGE_TAG=latest PLATFORMS=linux/amd64,linux/arm64
+```
+
+Run locally:
+
+```bash
+make docker-run
 ```
 
 ## Example MCP configuration

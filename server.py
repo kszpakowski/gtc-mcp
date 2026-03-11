@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import os
@@ -460,7 +461,42 @@ def gtc_document_full_resource(doc_id: str) -> str:
 
 
 def main() -> None:
-    mcp.run()
+    parser = argparse.ArgumentParser(description="Run the GTC MCP server.")
+    parser.add_argument(
+        "--host",
+        default=os.getenv("MCP_HOST", mcp.settings.host),
+        help="Host interface for HTTP transports.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("MCP_PORT", str(mcp.settings.port))),
+        help="Port for HTTP transports.",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=("stdio", "sse", "streamable-http"),
+        default=os.getenv("MCP_TRANSPORT", "stdio"),
+        help="MCP transport to use.",
+    )
+    parser.add_argument(
+        "--mount-path",
+        default=os.getenv("MCP_MOUNT_PATH"),
+        help="Optional mount path for the SSE transport.",
+    )
+    parser.add_argument(
+        "--streamable-http-path",
+        default=os.getenv("MCP_STREAMABLE_HTTP_PATH", mcp.settings.streamable_http_path),
+        help="HTTP path used for the streamable HTTP transport.",
+    )
+    args = parser.parse_args()
+
+    mcp.settings.host = args.host
+    mcp.settings.port = args.port
+    if args.mount_path:
+        mcp.settings.mount_path = args.mount_path
+    mcp.settings.streamable_http_path = args.streamable_http_path
+    mcp.run(transport=args.transport, mount_path=args.mount_path)
 
 
 if __name__ == "__main__":
