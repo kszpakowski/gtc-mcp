@@ -15,6 +15,7 @@ from pypdf import PdfReader
 from zeep.helpers import serialize_object
 from zeep.settings import Settings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 DEFAULT_WSDL = "https://gtc.nn.pl/gtc/services/GtcServiceHttpPort?wsdl"
 DEFAULT_CACHE_DIR = ".cache/gtc"
@@ -54,6 +55,34 @@ def _parse_date(value: str | None) -> date | None:
     if not value:
         return None
     return datetime.fromisoformat(value).date()
+
+
+def _split_csv(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _build_transport_security(
+    host: str,
+    allowed_hosts: list[str] | None = None,
+    allowed_origins: list[str] | None = None,
+) -> TransportSecuritySettings | None:
+    if allowed_hosts or allowed_origins:
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=allowed_hosts or [],
+            allowed_origins=allowed_origins or [],
+        )
+
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+            allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+        )
+
+    return None
 
 
 class GtcClient:
@@ -188,7 +217,22 @@ def _extract_document_text(file_extension: Any, document_bytes: bytes) -> str:
 
 
 gtc = GtcClient()
-mcp = FastMCP("gtc-documents")
+_default_host = os.getenv("MCP_HOST", "127.0.0.1")
+_default_port = int(os.getenv("MCP_PORT", "8000"))
+_default_streamable_http_path = os.getenv("MCP_STREAMABLE_HTTP_PATH", "/mcp")
+_default_allowed_hosts = _split_csv(os.getenv("MCP_ALLOWED_HOSTS"))
+_default_allowed_origins = _split_csv(os.getenv("MCP_ALLOWED_ORIGINS"))
+mcp = FastMCP(
+    "gtc-documents",
+    host=_default_host,
+    port=_default_port,
+    streamable_http_path=_default_streamable_http_path,
+    transport_security=_build_transport_security(
+        _default_host,
+        allowed_hosts=_default_allowed_hosts,
+        allowed_origins=_default_allowed_origins,
+    ),
+)
 
 
 def _matches_filters(
@@ -489,6 +533,16 @@ def main() -> None:
         default=os.getenv("MCP_STREAMABLE_HTTP_PATH", mcp.settings.streamable_http_path),
         help="HTTP path used for the streamable HTTP transport.",
     )
+    parser.add_argument(
+        "--allowed-hosts",
+        default=os.getenv("MCP_ALLOWED_HOSTS"),
+        help="Comma-separated Host header allowlist for HTTP transports.",
+    )
+    parser.add_argument(
+        "--allowed-origins",
+        default=os.getenv("MCP_ALLOWED_ORIGINS"),
+        help="Comma-separated Origin header allowlist for HTTP transports.",
+    )
     args = parser.parse_args()
 
     mcp.settings.host = args.host
@@ -496,6 +550,11 @@ def main() -> None:
     if args.mount_path:
         mcp.settings.mount_path = args.mount_path
     mcp.settings.streamable_http_path = args.streamable_http_path
+    mcp.settings.transport_security = _build_transport_security(
+        args.host,
+        allowed_hosts=_split_csv(args.allowed_hosts),
+        allowed_origins=_split_csv(args.allowed_origins),
+    )
     mcp.run(transport=args.transport, mount_path=args.mount_path)
 
 

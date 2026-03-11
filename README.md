@@ -83,7 +83,10 @@ export MCP_MOUNT_PATH="/mcp"
 export MCP_HOST="0.0.0.0"
 export MCP_PORT="8000"
 export MCP_STREAMABLE_HTTP_PATH="/mcp"
+export MCP_ALLOWED_HOSTS="gtc-mcp.gtc-mcp:8000"
 ```
+
+If you run behind Kubernetes or another reverse proxy and see `421 Misdirected Request` with `Invalid Host header`, set `MCP_HOST=0.0.0.0` and provide the externally used hostnames in `MCP_ALLOWED_HOSTS`.
 
 ## Container image
 
