@@ -12,8 +12,13 @@ MCP server exposing insurance terms and conditions from the NN SOAP API.
 - `get_gtc_document`
   - fetches a document by id
   - extracts text from PDF content for agent use
+  - truncates returned text by default and reports truncation metadata
 - `find_gtc_document_context`
-  - returns a compact context block with matching metadata and bodies
+  - returns a compact context block with matching metadata and truncated bodies
+- `search_gtc_document_text`
+  - searches a document body for phrases
+  - returns grep-like line context windows around matches
+  - caps the total response size
 - `search_gtc_documents`
   - filters by `prodCode`, `componentCode`, `typeName`, `withdrawn`
   - filters by `dateFrom` and `modDate` ranges
@@ -153,7 +158,8 @@ Get a document body:
 
 ```json
 {
-  "doc_id": "12345"
+  "doc_id": "12345",
+  "max_text_chars": 6000
 }
 ```
 
@@ -165,7 +171,22 @@ Get context for the agent:
     "language": "pl",
     "product": "life"
   },
-  "limit": 3
+  "limit": 3,
+  "max_text_chars_per_document": 2500,
+  "max_result_chars": 7000
+}
+```
+
+Search a document body for specific phrases with line context:
+
+```json
+{
+  "doc_id": "12345",
+  "phrases": ["wyłączenia", "karencja"],
+  "before_lines": 2,
+  "after_lines": 3,
+  "max_matches": 10,
+  "max_result_chars": 6000
 }
 ```
 

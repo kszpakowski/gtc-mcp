@@ -20,6 +20,10 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 DEFAULT_WSDL = "https://gtc.nn.pl/gtc/services/GtcServiceHttpPort?wsdl"
 DEFAULT_CACHE_DIR = ".cache/gtc"
+DEFAULT_DOCUMENT_TEXT_LIMIT = 12000
+DEFAULT_CONTEXT_DOCUMENT_TEXT_LIMIT = 4000
+DEFAULT_RESOURCE_TEXT_LIMIT = 12000
+DEFAULT_SEARCH_RESULT_TEXT_LIMIT = 8000
 
 
 def _normalize(value: Any) -> Any:
@@ -62,6 +66,74 @@ def _split_csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _truncate_text(text: str, max_chars: int) -> tuple[str, bool]:
+    limit = max(max_chars, 0)
+    if len(text) <= limit:
+        return text, False
+    if limit == 0:
+        return "", True
+    if limit <= 3:
+        return text[:limit], True
+    return f"{text[: limit - 3]}...", True
+
+
+def _windowed_phrase_matches(
+    lines: list[str],
+    phrases: list[str],
+    before: int,
+    after: int,
+    case_sensitive: bool,
+    max_matches: int,
+) -> tuple[list[dict[str, Any]], int]:
+    if not phrases or not lines:
+        return [], 0
+
+    phrase_pairs = [
+        (phrase, phrase if case_sensitive else phrase.lower())
+        for phrase in phrases
+        if phrase
+    ]
+    if not phrase_pairs:
+        return [], 0
+
+    matches: list[dict[str, Any]] = []
+    total_matches = 0
+    for index, line in enumerate(lines):
+        haystack = line if case_sensitive else line.lower()
+        matched_phrases = [
+            phrase
+            for phrase, normalized in phrase_pairs
+            if normalized and normalized in haystack
+        ]
+        if not matched_phrases:
+            continue
+
+        total_matches += 1
+        if len(matches) >= max(max_matches, 0):
+            continue
+
+        start = max(index - max(before, 0), 0)
+        end = min(index + max(after, 0) + 1, len(lines))
+        matches.append(
+            {
+                "lineNumber": index + 1,
+                "matchedPhrases": matched_phrases,
+                "contextStartLine": start + 1,
+                "contextEndLine": end,
+                "context": [
+                    {
+                        "lineNumber": line_index + 1,
+                        "text": lines[line_index],
+                        "isMatch": line_index == index,
+                    }
+                    for line_index in range(start, end)
+                ],
+            }
+        )
+
+    return matches, total_matches
 
 
 def _build_transport_security(
@@ -413,16 +485,23 @@ def search_gtc_documents(
 
 
 @mcp.tool()
-def get_gtc_document(doc_id: str) -> dict[str, Any]:
+def get_gtc_document(
+    doc_id: str,
+    max_text_chars: int = DEFAULT_DOCUMENT_TEXT_LIMIT,
+) -> dict[str, Any]:
     """
     Fetch a single document body.
     """
     document = gtc.get_doc_body(doc_id)
+    text, text_truncated = _truncate_text(document["text"], max_text_chars)
     return {
         "docId": document["docId"],
         "fileName": document["fileName"],
         "fileExtension": document["fileExtension"],
-        "text": document["text"],
+        "text": text,
+        "fullTextLength": len(document["text"]),
+        "returnedTextLength": len(text),
+        "textTruncated": text_truncated,
         "bytesLength": len(document["documentBytes"]),
         "cacheHit": document["cacheHit"],
     }
@@ -435,6 +514,8 @@ def find_gtc_document_context(
     sort_by: str | None = None,
     descending: bool = False,
     limit: int = 5,
+    max_text_chars_per_document: int = DEFAULT_CONTEXT_DOCUMENT_TEXT_LIMIT,
+    max_result_chars: int = DEFAULT_SEARCH_RESULT_TEXT_LIMIT,
 ) -> str:
     """
     Return metadata and bodies for matching documents in a context-friendly format.
@@ -460,12 +541,93 @@ def find_gtc_document_context(
         doc_id = _resolve_doc_id(document)
         if doc_id:
             body = gtc.get_doc_body(doc_id)
+            text, text_truncated = _truncate_text(
+                body["text"],
+                max_text_chars_per_document,
+            )
             lines.append("")
             lines.append(f"Document: {body['fileName'] or doc_id}")
             lines.append("Body:")
-            lines.append(body["text"])
+            lines.append(text)
+            if text_truncated:
+                lines.append("")
+                lines.append(
+                    f"[Body truncated to {len(text)} of {len(body['text'])} characters]"
+                )
 
-    return "\n".join(lines)
+    rendered = "\n".join(lines)
+    rendered, result_truncated = _truncate_text(rendered, max_result_chars)
+    if result_truncated:
+        rendered = (
+            f"{rendered}\n\n[Result truncated to {len(rendered)} characters total]"
+        )
+    return rendered
+
+
+@mcp.tool()
+def search_gtc_document_text(
+    doc_id: str,
+    phrases: list[str],
+    before_lines: int = 2,
+    after_lines: int = 2,
+    case_sensitive: bool = False,
+    max_matches: int = 20,
+    max_result_chars: int = DEFAULT_SEARCH_RESULT_TEXT_LIMIT,
+) -> dict[str, Any]:
+    """
+    Search a document body for phrases and return grep-like line context windows.
+    """
+    document = gtc.get_doc_body(doc_id)
+    lines = document["text"].splitlines()
+    matches, total_matches = _windowed_phrase_matches(
+        lines=lines,
+        phrases=phrases,
+        before=before_lines,
+        after=after_lines,
+        case_sensitive=case_sensitive,
+        max_matches=max_matches,
+    )
+
+    response = {
+        "docId": document["docId"],
+        "fileName": document["fileName"],
+        "fileExtension": document["fileExtension"],
+        "lineCount": len(lines),
+        "searchPhrases": phrases,
+        "beforeLines": max(before_lines, 0),
+        "afterLines": max(after_lines, 0),
+        "caseSensitive": case_sensitive,
+        "totalMatchedLines": total_matches,
+        "returnedMatches": matches,
+        "matchesTruncated": total_matches > len(matches),
+        "cacheHit": document["cacheHit"],
+    }
+
+    rendered = json.dumps(response, ensure_ascii=False, indent=2)
+    rendered, result_truncated = _truncate_text(rendered, max_result_chars)
+    if not result_truncated:
+        response["resultTruncated"] = False
+        response["resultLength"] = len(rendered)
+        return response
+
+    return {
+        "docId": document["docId"],
+        "fileName": document["fileName"],
+        "fileExtension": document["fileExtension"],
+        "lineCount": len(lines),
+        "searchPhrases": phrases,
+        "beforeLines": max(before_lines, 0),
+        "afterLines": max(after_lines, 0),
+        "caseSensitive": case_sensitive,
+        "totalMatchedLines": total_matches,
+        "returnedMatchCount": len(matches),
+        "matchesTruncated": total_matches > len(matches),
+        "resultTruncated": True,
+        "resultLength": max_result_chars,
+        "maxResultChars": max_result_chars,
+        "preview": rendered,
+        "cacheHit": document["cacheHit"],
+    }
 
 
 @mcp.tool()
@@ -526,7 +688,13 @@ def gtc_document_resource(doc_id: str) -> str:
     Resource for a document body that can be attached directly as agent context.
     """
     document = gtc.get_doc_body(doc_id)
-    return document["text"]
+    text, text_truncated = _truncate_text(document["text"], DEFAULT_RESOURCE_TEXT_LIMIT)
+    if not text_truncated:
+        return text
+    return (
+        f"{text}\n\n"
+        f"[Document truncated to {len(text)} of {len(document['text'])} characters]"
+    )
 
 
 @mcp.resource("gtc://documents/{doc_id}/full")
@@ -548,7 +716,9 @@ def gtc_document_full_resource(doc_id: str) -> str:
             "body": {
                 "fileName": body["fileName"],
                 "fileExtension": body["fileExtension"],
-                "text": body["text"],
+                "text": _truncate_text(body["text"], DEFAULT_RESOURCE_TEXT_LIMIT)[0],
+                "textTruncated": len(body["text"]) > DEFAULT_RESOURCE_TEXT_LIMIT,
+                "fullTextLength": len(body["text"]),
                 "bytesLength": len(body["documentBytes"]),
             },
         },
