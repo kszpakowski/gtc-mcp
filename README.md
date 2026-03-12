@@ -18,6 +18,9 @@ MCP server exposing insurance terms and conditions from the NN SOAP API.
   - filters by `prodCode`, `componentCode`, `typeName`, `withdrawn`
   - filters by `dateFrom` and `modDate` ranges
   - can restrict results to documents active on a given date
+- `diff_gtc_documents`
+  - compares two documents by extracted text
+  - returns a unified diff and metadata for both files
 - resources
   - `gtc://documents/{doc_id}`
   - `gtc://documents/{doc_id}/full`
@@ -163,6 +166,17 @@ Get context for the agent:
     "product": "life"
   },
   "limit": 3
+}
+```
+
+Compare two documents:
+
+```json
+{
+  "left_doc_id": "104352",
+  "right_doc_id": "104356",
+  "context_lines": 2,
+  "max_diff_lines": 200
 }
 ```
 

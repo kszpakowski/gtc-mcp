@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import difflib
 import json
 import os
 from io import BytesIO
@@ -465,6 +466,58 @@ def find_gtc_document_context(
             lines.append(body["text"])
 
     return "\n".join(lines)
+
+
+@mcp.tool()
+def diff_gtc_documents(
+    left_doc_id: str,
+    right_doc_id: str,
+    context_lines: int = 3,
+    max_diff_lines: int = 400,
+) -> dict[str, Any]:
+    """
+    Compare two documents and return a unified diff of their extracted text.
+    """
+    left = gtc.get_doc_body(left_doc_id)
+    right = gtc.get_doc_body(right_doc_id)
+
+    left_lines = left["text"].splitlines()
+    right_lines = right["text"].splitlines()
+    diff_lines = list(
+        difflib.unified_diff(
+            left_lines,
+            right_lines,
+            fromfile=left["fileName"] or left_doc_id,
+            tofile=right["fileName"] or right_doc_id,
+            n=max(context_lines, 0),
+            lineterm="",
+        )
+    )
+
+    truncated = len(diff_lines) > max(max_diff_lines, 0)
+    visible_diff_lines = diff_lines[: max(max_diff_lines, 0)]
+
+    return {
+        "left": {
+            "docId": left["docId"],
+            "fileName": left["fileName"],
+            "fileExtension": left["fileExtension"],
+            "bytesLength": len(left["documentBytes"]),
+            "cacheHit": left["cacheHit"],
+        },
+        "right": {
+            "docId": right["docId"],
+            "fileName": right["fileName"],
+            "fileExtension": right["fileExtension"],
+            "bytesLength": len(right["documentBytes"]),
+            "cacheHit": right["cacheHit"],
+        },
+        "leftLineCount": len(left_lines),
+        "rightLineCount": len(right_lines),
+        "diffLineCount": len(diff_lines),
+        "truncated": truncated,
+        "diff": "\n".join(visible_diff_lines),
+    }
 
 
 @mcp.resource("gtc://documents/{doc_id}")
